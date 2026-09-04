@@ -1,6 +1,7 @@
 # SPEC — <<PROJECT NAME>>
 
-> Fill every `<<...>>`. Delete guidance blockquotes when done. This file is the
+> Fill the first flow, its ACs, non-goals, and key risks at Stage 0; mark later
+> features planned. Delete guidance blockquotes when done. This file is the
 > source of truth for *what* gets built. After Stage 0 it changes only via an ADR.
 
 ## 1. Vision (one paragraph)
@@ -51,8 +52,10 @@ one sentence a user would say.>>
 
 ## 5. Golden demo script
 
-> Written in Stage 0. This IS the MVP definition: Stage 1 is done when every line
-> works. It is also the spec for the single smoke test that runs from Stage 1 on.
+> Describe the flow in Stage 0. Automate it alongside the real feature, due at
+> its first Stage 1 integration milestone. Stage 1 is done when every line works
+> and the integrated milestone evidence passes; no browser framework is needed
+> merely to exit Stage 0.
 
 1. <<Open the app → see landing page>>
 2. <<Sign up as a new user>>

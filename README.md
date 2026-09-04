@@ -1,154 +1,158 @@
 # multi-agent-max
 
-A reusable planning package for building production software with a
-**Planner / Worker / Verifier** agent loop, a single machine-checkable gate
-(`scripts/verify.sh`), and a rigor dial that ramps from "build the MVP fast,
-unattended" to "fresh-clone, red-teamed, signed-off release."
+A reusable Planner / Worker / Verifier package for building software with clear
+requirements, independent review, visible debt, and evidence of working behavior.
+Start with a small Stage 0; build with focused checks; verify combined features at
+integration milestones; certify the release from a clean checkout.
 
-Design lineage: Miller's *formalization game* (machine-checkable win condition,
-contracts locked first, lessons earned from failures, append-only audit record) and
-OpenProver (Planner/Worker/Verifier, blind verification, whiteboard + repository).
+**Local checks prove local progress. Milestone checks certify integrated work.
+Release checks support human sign-off.** A green ticket run is not a full-app pass.
 
----
+Design lineage: Miller's formalization game (checkable outcomes, explicit agreements,
+lessons from failures, audit records) and OpenProver (Planner/Worker/Verifier,
+independent verification, whiteboard + repository).
 
-## The one idea
-
-**An agent's claim of "done" is worth nothing. Only `scripts/verify.sh` exiting 0 is
-a certificate.** Every other file here exists either to tell agents exactly what to
-build, or to produce evidence that script can check.
-
-You intervene at three points only: review contracts (Stage 0), watch a demo
-(Stage 2), sign off (Stage 4). Everything between runs on the automated gate.
-
----
-
-## Quick start — new project
+## Quick start
 
 ```bash
-# 1. Create your project repo (or cd into an existing one) and pull in the plan
 mkdir my-app && cd my-app && git init
 git clone --depth 1 git@github.com:Transformation-Agency/multi-agent-max.git plan
-rm -rf plan/.git                        # it's your copy now; the plan lives with the project
-
-# 2. Fill in the two human-authored files (this is the highest-leverage hour of the project)
-$EDITOR plan/SPEC.md                     # vision, NON-goals, features → AC-xx.yy, golden demo, risk list
-$EDITOR plan/ARCHITECTURE.md             # stack adapter, boundaries, contracts, external services
-
-# 3. Wire the stack adapter (the ONLY stack-specific part)
-#    - add the package scripts verify.sh calls (see "Stack adapter contract" below)
-#    - edit the `# STACK ADAPTER` lines in plan/scripts/verify.sh if you're not on Node/pnpm
-#    - make test runners write JSON to .reports/ (for AC coverage)
-
-# 4. Baseline the gate and commit
-plan/scripts/checks/config-hash.sh --init
-git add -A && git commit -m "chore: adopt multi-agent-max plan [ADR-000]"
-
-# 5. Start the planner (Claude Code: open the repo and paste prompts/planner.md as the first message)
-#    Its first job is tickets/T-000-stage0-scaffold.md. When it finishes, review the contracts
-#    it produced — that's human touchpoint #1 — then let it run Stage 1 unattended.
+rm -rf plan/.git
 ```
 
-Sanity check before starting the planner: `STAGE=0 TICKET=setup plan/scripts/verify.sh`
-should end with `✓ PASS` (unconfigured checks show as `skipped: not configured`).
+Fill SPEC.md with the first user flow, acceptance criteria, non-goals, and risks.
+Fill ARCHITECTURE.md with stack, essential data/access decisions, and interfaces
+needed for the first assignments. Future interfaces can remain planned. Start the
+Planner using `plan/prompts/planner.md` in an agent environment that can dispatch
+subagents/worktrees; this repo does not launch agents itself.
 
-### Stack adapter contract
-
-`verify.sh` calls these package scripts via `pnpm run <name>` and treats a missing
-script as "not configured" (skipped, not failed). Add them as you go:
-
-| Script | Needed from | Suggested command (Next.js/TS) |
-|---|---|---|
-| `typecheck` | Stage 0 | `tsc --noEmit` |
-| `lint:bugs` | Stage 0 | `eslint . --max-warnings 0` with style rules off |
-| `lint` | Stage 3 | full eslint incl. style |
-| `test:unit` | Stage 0 | `vitest run --reporter=json --outputFile=.reports/unit.json` |
-| `build` | Stage 0 | `next build` |
-| `test:smoke` | Stage 0 | ONE golden-demo flow, ~30s (`playwright test --grep @golden`) |
-| `test:integration` | Stage 2 | `vitest run -c vitest.integration.ts --reporter=json --outputFile=.reports/int.json` |
-| `test:e2e:smoke` | Stage 2 | `playwright test --grep @smoke` (3–6 flows) |
-| `test:e2e` | Stage 3 | `playwright test` (json reporter → `.reports/e2e.json`) |
-| `audit` | Stage 3 | `pnpm audit --audit-level high && gitleaks detect` |
-| `check:env` | Stage 3 | boot env-schema validation |
-| `test:rt` | Stage 3 | tests named `[RT-xx]` (red-team regressions) |
-
-Non-Node stacks: replace the `pkg()` helper in `verify.sh` with your runner (make, cargo,
-poetry…) — the rule is "exit 3 = not configured", anything else non-zero = fail.
-
----
-
-## How it runs
-
-```
-Stage 0  Lock       contracts/stubs/CI/seed/golden-demo smoke   ← human: review contracts
-Stage 1  MVP        unattended sprint, automated gate only       ← no human
-Stage 2  Integrate  verifiers on, integration + smoke e2e        ← human: one demo walkthrough
-Stage 3  Harden     red team, AC coverage 100%, debt burn-down   ← human: triage P0/P1 only
-Stage 4  Release    fresh-clone verify, acceptance report        ← human: sign-off
-```
-
-The planner advances `stage:` in `state/WHITEBOARD.md` only when the stage's exit gate
-in `STAGES.md` passes, then tags git `stage-N-complete`. Full check matrix: `STAGES.md`.
-
-Mapping to Claude Code: planner = your main session (or a Workflow script); workers =
-subagents, one git worktree each; verifiers = *fresh* subagents given only ticket + diff
-+ evidence; red team = fresh subagent at Stage 3. Strongest model for planner / verifier /
-red team; a faster model is fine for workers on well-specified tickets.
-
----
-
-## Layout
-
-| Path | What it is | Who edits it |
-|---|---|---|
-| `SPEC.md` | What we're building: vision, non-goals, features → `AC-xx.yy`, golden demo, risk list | **You** (Stage 0), then ADR only |
-| `ARCHITECTURE.md` | Stack adapter, boundaries, reusable layer, contracts, external services | **You** (Stage 0), then ADR only |
-| `STAGES.md` | The rigor dial — checks per stage, exit gates, invariants | Template |
-| `PROTOCOL.md` | Roles, visibility, ticket lifecycle, state, evidence, failure handling, red team, final acceptance | Template |
-| `CLAUDE.md` | Loaded by every agent: invariants + **active** lessons (generated) | `scripts/gen-claude-md.sh` |
-| `prompts/*.md` | Role prompts: planner, worker, verifier, red-team | Template |
-| `tickets/` | One file per unit of work (`TEMPLATE.md`, `T-000` scaffold ticket) | Planner creates |
-| `state/WHITEBOARD.md` | Planner's compact live state — first thing any agent reads | Planner |
-| `state/DECISIONS.md` | Append-only ADR log | Planner / human |
-| `state/LESSONS.md` | Append-only lesson record (L/P/M/B series) | Planner |
-| `state/DEBT.md` | Declared shortcuts with owning ticket | Workers append, planner burns down |
-| `state/LEDGER.md` | One line per ticket state transition — the audit trail | Scripts + verifier |
-| `state/evidence/<T>/attempt-N/` | `verify.json`, `verify.log`, diff, notes, verdict — every attempt, incl. failures | `verify.sh` + verifier |
-| `scripts/verify.sh` | THE gate | Template + stack adapter lines |
-| `scripts/checks/*` | Anti-gaming + audit checks | Template |
-
-## Invariants (never relax, any stage)
-
-1. Contracts change only via an ADR in `state/DECISIONS.md`.
-2. Tests are never weakened to pass. Flaky → quarantine + ticket, never retried into green.
-3. Debt is declared in `state/DEBT.md`, never hidden.
-4. `state/WHITEBOARD.md` is maintained.
-5. Audit files (`LESSONS`, `DECISIONS`, `DEBT`, `LEDGER`, `evidence/`) are append-only — enforced by `scripts/checks/audit-append-only.sh`.
-6. Only a Verifier moves a ticket to `done`.
-
-## What the gate catches (tested)
-
-`verify.sh` fails on: a skipped/focused test · a test file with no assertions · a drop in
-test count without an ADR · growth in `eslint-disable` / `@ts-ignore` / `as any` without an
-ADR · an undeclared `TODO`/`FIXME` · any edit to a prior line of an audit file · a deleted
-evidence file · a loosened `verify.sh` or lint/ts/test config · a dirty tree under `--fresh`
-· uncovered ACs at Stage 3+ · open debt at Stage 4.
+T-000 gets the scaffold starting locally, records the startup check, and requests
+human review. It does NOT require CI, full contract stubs, seed data for future
+features, a complete test framework, or a fresh build. Then begin feature work.
+T-001 owns core verification setup alongside the first real flow, due at the first
+stage 1 milestone. Do not replace implementation with repeated infrastructure work.
 
 ## Daily commands
 
+Run commands from the application root; the template lives in `plan/`.
+
 ```bash
-STAGE=1 TICKET=T-012 plan/scripts/verify.sh            # worker, before submitting
-STAGE=2 TICKET=T-012 plan/scripts/verify.sh --fresh    # verifier, always --fresh, on a committed branch
-plan/scripts/ac-coverage.sh [--strict]                 # AC → test traceability
-plan/scripts/new-ticket.sh T-013 "Short title" [stage] # planner
-plan/scripts/gen-claude-md.sh                          # after appending to LESSONS.md
-plan/scripts/checks/config-hash.sh --init              # after an ADR-approved change to the gate
+# Worker: explicit focused command, dependencies/caches preserved.
+STAGE=1 TICKET=T-012 plan/scripts/verify.sh --profile ticket -- pnpm run test:unit -- src/projects.test.ts
+
+# Verifier/Planner: combined feature group, broader stage checks, no reinstall.
+STAGE=1 TICKET=M-001 plan/scripts/verify.sh --profile milestone
+STAGE=2 TICKET=M-002 plan/scripts/verify.sh --profile milestone
+
+# Release candidate: clean committed checkout, full checks, fresh install.
+STAGE=4 TICKET=release plan/scripts/verify.sh --profile release --fresh
+
+plan/scripts/new-ticket.sh T-013 "Short title" 1
+plan/scripts/gen-claude-md.sh
+# Configure and commit at first milestone; later baseline changes cite a decision.
+plan/scripts/checks/config-hash.sh --init
 ```
 
-## Requirements
+Ticket mode requires a command after `--`; at Stage 0 use an actual finite startup
+check (start server, verify response, shut it down), or an existing scaffold check.
+An automated test is preferred as soon as the real behavior exists. A placeholder
+command such as `true` is not acceptable evidence. The Verifier judges relevance.
 
-bash ≥ 3.2 (macOS default is fine), git, node (JSON report parsing), your stack's toolchain.
+## Verification profiles
 
-## Updating the template itself
+| Profile | Scope | Result |
+|---|---|---|
+| ticket | Explicit focused command + cheap audit/debt/config checks | Local-only pass; broader checks listed as deferred |
+| milestone | Stage-specific build, tests, integration and security checks | Integrated evidence; missing required setup fails |
+| release | Stage 4 checks + clean install and debt closure | Release evidence; human approval still required |
 
-Improvements earned on a project (new checks, better prompts, lessons that generalize)
-belong back here. Open a PR against this repo; project-specific lessons stay in the project.
+Default profile: ticket at stages 0–1, milestone at 2–3, release at 4. Explicit
+profiles in tickets avoid accidental broad runs. Stage 4 requires release --fresh.
+
+Milestones run after coherent feature groups and before substantial downstream
+work relies on changed shared interfaces. Independent failures are collected in
+one report; dependent browser checks are blocked after a failed build. Repair with
+focused checks, then rerun the milestone on the repaired combined state. Do not
+reinstall dependencies at each handoff. A failed fresh install stops further checks.
+
+Full runs own `.reports/*.json` and `.reports/*.xml`: stale reports are cleared,
+then AC coverage runs after all producing suites. Keep fixtures/evidence elsewhere.
+Review may reuse valid evidence for unchanged code/config/dependencies/environment,
+including CI evidence. Rebase/merge changes require verification of the combined result.
+
+## Stack adapter
+
+The default runner uses Node/pnpm. Add scripts alongside the first feature; the
+following become REQUIRED at their first applicable milestone, not at Stage 0:
+
+| Script | First milestone stage | Example |
+|---|---|---|
+| typecheck | 1 | tsc --noEmit |
+| lint:bugs | 1 | eslint with bug rules |
+| test:unit | 1 | vitest run --reporter=json --outputFile=.reports/unit.json |
+| build | 1 | next build |
+| test:smoke | 1 | one real golden-demo flow |
+| test:integration | 2 | runner writing .reports/int.json |
+| test:e2e:smoke | 2 | a few critical integrated browser flows |
+| lint | 3 | full lint rules |
+| test:e2e | 3 | full browser suite writing .reports/e2e.json |
+| audit | 3 | dependency audit + secret scan |
+| check:env | 3 | environment-schema validation |
+| test:rt | 3, if RT tickets exist | regression tests for red-team findings |
+
+Also configure module boundaries at Stage 2, performance checks only when SPEC
+requires them, and config-hash baseline before the first milestone. Non-Node stacks:
+adapt pkg/fresh_install and relevant checks, document genuine inapplicability in
+ARCHITECTURE, and review changes. Exit 3 means unconfigured; required milestone/
+release checks fail on it. Optional inapplicable checks are never represented as passes.
+
+CI can be introduced at Stage 2; if deferred, T-001 records a concrete owner and it
+must exist before release. CI runs the same milestone/release command, rather than
+an independent duplicate checking system. Keep fast local checks while developing.
+
+## Process and records
+
+Stages remain Prepare → MVP → Integrate → Harden → Release. Human touchpoints remain
+initial scope/design review, integrated demo, severe-risk decisions, and final approval.
+See STAGES.md for exact exit criteria and PROTOCOL.md for roles and evidence rules.
+
+Tickets progress `todo → building → implemented → done`. Workers may set implemented
+after focused evidence. Verifier sets done only after required review and passing
+integrated milestone evidence. T-000 human acceptance is the infrastructure exception.
+
+| Path | Purpose |
+|---|---|
+| SPEC.md / ARCHITECTURE.md | Intent, ACs, design, shared interfaces |
+| STAGES.md / PROTOCOL.md | Verification schedule and operating rules |
+| prompts/ | Planner, Worker, Verifier, Red Team roles |
+| CLAUDE.md | Standing rules and generated active lessons |
+| tickets/ | Scope, focused commands, integration milestone ownership |
+| state/WHITEBOARD.md | Current state, milestones, deferrals, blockers |
+| state/DECISIONS.md / LESSONS.md | Decisions and earned lessons |
+| state/DEBT.md | Shortcuts, append-only closure/accepted-deferral records |
+| state/LEDGER.md | Ticket and milestone transition history |
+| state/evidence/ | Every verification attempt, diffs, notes, verdicts |
+
+Keep tests meaningful, contracts shared by Workers explicit, debt visible, audit
+records append-only. The scripts are guardrails: text scans and AC IDs do not prove
+behavior or guarantee security. Independent review and human acceptance remain essential.
+
+## Migrating an existing project
+
+Preserve its tests, CI, contracts, and existing audit history. Adopt the three profiles,
+replace per-ticket --fresh commands with explicit focused commands, and add milestone
+ownership to active tickets. Map old verifying tickets to implemented only when local
+evidence exists; preserve historical verdicts/status lines. Do not invalidate previously
+certified done work solely due to terminology. Re-baseline the changed gate under a
+recorded decision after review. Update prompts/STAGES/PROTOCOL/CLAUDE together.
+
+## Requirements and template validation
+
+bash ≥3.2, git, node, and the application's stack toolchain. To test this template's
+profile orchestration without installing application dependencies:
+
+```bash
+node scripts/tests/verify-profiles.test.js
+```
+
+Changes earned on projects can return here as PRs; project-specific lessons stay there.

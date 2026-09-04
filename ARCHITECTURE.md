@@ -1,9 +1,13 @@
 # ARCHITECTURE — <<PROJECT NAME>>
 
-> Fill every `<<...>>`. After Stage 0 this file changes only via an ADR in
+> Fill essentials for the first flow at Stage 0; mark future sections planned.
+> Subsequent shared-contract/design changes use an ADR in
 > `state/DECISIONS.md`. Contracts live as *code* in the repo; this file points to them.
 
 ## 1. Stack adapter
+
+Commands below are targets to wire alongside features, not Stage 0 prerequisites.
+Core checks are due at the first Stage 1 milestone; see STAGES.md for later checks.
 
 > The ONLY stack-specific part of the whole package. `scripts/verify.sh` mirrors
 > these commands in its `# STACK ADAPTER` block — keep them in sync.
@@ -61,10 +65,11 @@ data flows between them.>>
 - `<<src/core/>>`
 - `<<src/integrations/<x>/>>`
 
-## 4. Contracts (locked in Stage 0)
+## 4. Shared contracts (define when needed)
 
-> Each is a file in the repo that compiles with stub implementations before any
-> feature work starts. Changing any of these after Stage 0 requires an ADR.
+> Define interfaces needed by the first assignments at Stage 0. Other interfaces
+> remain planned until their features need them; no full stub scaffold is required.
+> Changes to agreements already consumed by Workers require an ADR and affected checks.
 
 | Contract | Location | Format |
 |---|---|---|
@@ -92,7 +97,10 @@ data flows between them.>>
 ## 7. Environments & config
 
 - Local: <<docker compose for db>>
-- CI: <<what runs verify.sh; which stage>>
+- CI: <<introduce at Stage 2, or name a release-owned deferral; required by release>>
+- Verification: ticket = explicit focused command; milestone = combined feature checks;
+  release = clean checkout + --fresh. Preserve caches during normal development.
+- First milestone: <<M-001 scope + T-001 verification setup owner>>
 - Preview / prod: <<...>>
 - Secrets: never in repo; env schema validated at boot (`AC` for this if relevant).
 
