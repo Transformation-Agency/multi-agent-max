@@ -5,7 +5,8 @@
 - **Depends on:** <<T-000, T-004>>
 - **Budget:** 1 context window / 2 h
 - **Owner (worker id):** —
-- **Verifier required:** <<auto (gate only) | blind verifier>>  ← per STAGES.md process dial
+- **Verifier required:** <<risk-ticket review | milestone review | all-ticket review>> — per STAGES.md
+- **Integration milestone:** <<M-001>> (owns broader deferred checks)
 
 ## Goal (one sentence)
 <<What exists when this is done.>>
@@ -24,14 +25,21 @@
 ## Out of scope (do not touch)
 - <<e.g. UI for listing projects (T-007); auth changes>>
 
-## Verification
+## Focused verification (local evidence only)
 ```bash
-STAGE=<<1>> TICKET=T-xxx scripts/verify.sh
+STAGE=<<1>> TICKET=T-xxx plan/scripts/verify.sh --profile ticket -- <<command>> <<args>>
 ```
 
 ## Evidence required
-- Stage 1: `verify.json` + `diff.patch`
-- Stage 2+: + `notes.md` (built / ACs / not-done / debt / repro) + screenshots or API logs if UI/API
+- `verify.json` + `diff.patch` + `notes.md` (tested revision, command, ACs, not-done, debt, deferred checks + milestone)
+- Stage 2+: screenshots or API logs when needed to substantiate UI/API behavior
+
+## Integration acceptance
+
+- Worker sets `implemented` after focused evidence.
+- Required review: <<...>>.
+- Milestone command: `STAGE=<<1>> TICKET=<<M-001>> plan/scripts/verify.sh --profile milestone`.
+- Verifier sets `done` only after required review and passing combined milestone evidence.
 
 ## Applicable lessons
 - <<L3, P2>>

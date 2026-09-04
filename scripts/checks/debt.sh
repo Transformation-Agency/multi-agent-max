@@ -5,8 +5,21 @@ PLAN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; REPO_ROOT="$(cd 
 DEBT="$PLAN_DIR/state/DEBT.md"
 SRC_DIRS=(); for d in src app lib; do [[ -d $d ]] && SRC_DIRS+=("$d"); done   # ── STACK ADAPTER ──
 fail=0
-# open rows = table rows between "## Open" and "## Closed"
-open_rows=$(awk '/^## Open/{f=1;next}/^## Closed/{f=0}f' "$DEBT" | grep -E '^\| *D-?[0-9A-Za-z]+' || true)
+# Open records persist; matching appended closure/acceptance records resolve them.
+open_rows=$(awk '
+  /^## Open/{section="open";next}
+  /^## Closed/{section="closed";next}
+  /^\|/{
+    split($0, fields, "|"); id=fields[2]; gsub(/^[ \t]+|[ \t]+$/, "", id)
+    if (id !~ /^D-?[0-9A-Za-z]+$/) next
+    if(section=="open") {rows[id]=$0; order[++n]=id}
+    if(section=="closed") {
+      outcome=fields[5]; gsub(/^[ \t]+|[ \t]+$/, "", outcome)
+      if(outcome ~ /^(closed|deferred-accepted)([ \t:]|$)/) resolved[id]=1
+    }
+  }
+  END {for(i=1;i<=n;i++) if(!resolved[order[i]]) print rows[order[i]]}
+' "$DEBT")
 if [[ "${1:-}" == "--must-be-empty" ]]; then
   if [[ -n "$open_rows" ]]; then echo "debt: open items remain at stage 4:"; echo "$open_rows" | sed 's/^/  /'; exit 1; fi
   echo "debt: ledger closed"; exit 0

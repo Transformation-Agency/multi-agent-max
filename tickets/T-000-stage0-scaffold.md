@@ -1,46 +1,40 @@
-# T-000 — Stage 0: scaffold, lock contracts, CI, seed, golden-demo smoke
+# T-000 — Stage 0: first flow, essential design, local scaffold
 
 - **Status:** todo
 - **Stage:** 0
-- **Depends on:** — (SPEC.md and ARCHITECTURE.md filled in by human)
-- **Budget:** 1 context window / 2 h (split into T-000a/b/c if larger)
+- **Depends on:** SPEC and essential ARCHITECTURE decisions available
+- **Budget:** One context window; target a short setup pass, split if genuinely blocked
 - **Owner (worker id):** —
-- **Verifier required:** human (contract review = touchpoint 1)
+- **Verifier required:** human scope/design review
+- **Integration milestone:** M-001 (broader checks owned by T-001)
 
 ## Goal
-The repo compiles, CI runs `verify.sh` at stage 0 green, every contract in
-ARCHITECTURE §4 exists as code with stub implementations, seed fixtures load, and
-a single golden-demo smoke test passes against the stubs.
-
-## Contracts this implements
-- All of ARCHITECTURE.md §4 (types, DB schema + migration 0, API surface stubs, auth model, env schema, events)
-
-## Acceptance criteria
-- (none from SPEC — this is infrastructure; exit gate is STAGES.md "Stage 0 → 1")
+The first feature is clearly defined, the scaffold starts locally, essential data/
+access decisions are recorded, and no unresolved blocker prevents implementation.
 
 ## In scope
-- Project scaffold per ARCHITECTURE §1 stack adapter
-- Contract files with `throw new Error("not implemented")` / TODO stubs, compiling
-- `scripts/verify.sh` stack-adapter lines wired and green at STAGE=0
-- CI workflow running `STAGE=0 scripts/verify.sh --fresh`
-- `db:seed` fixtures (the data every worker + smoke test starts from)
-- One smoke test implementing SPEC §5 golden demo as far as stubs allow (at minimum: app boots, home route 200)
-- `scripts/checks/config-hash.sh --init` baseline committed
-- Lint config: bug rules only (style rules present but off until Stage 3)
+- First-flow ACs, non-goals, major risks, and necessary stack/shared-interface decisions.
+- Minimal scaffold and actual startup check; reuse useful existing checks.
+- Document first assignments and T-001 ownership of deferred verification setup.
+- Human review before Stage 1.
 
 ## Out of scope
-- Any feature logic. Any UI beyond a placeholder page.
+- CI, full build/test certification, config baseline, complete contract stubs.
+- Browser-test infrastructure or seed fixtures for features not being built yet.
+- Future API/schema design beyond the first assignments' dependencies.
 
-## Verification
+## Local verification
+Planner fills in an exact finite command that starts/checks/stops the scaffold,
+or uses an existing startup test. Do not substitute a no-op.
+
 ```bash
-STAGE=0 TICKET=T-000 scripts/verify.sh --fresh
+STAGE=0 TICKET=T-000 plan/scripts/verify.sh --profile ticket -- <<startup-check-command>>
 ```
 
-## Evidence required
-- Full bundle: verify.json, diff.patch, notes.md listing every contract file created and the command to run the smoke test
-
-## Applicable lessons
-- (none yet)
+## Evidence and acceptance
+Startup command/result, implementation revision/diff, notes listing essential
+decisions and deferred checks owned by M-001/T-001. Human acceptance permits done
+as the infrastructure exception; it does not claim integrated verification.
 
 ## Log
 - created by template

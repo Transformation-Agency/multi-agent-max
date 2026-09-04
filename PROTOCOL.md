@@ -1,130 +1,149 @@
-# PROTOCOL — roles, tickets, state, verification, failure handling
+# PROTOCOL — roles, tickets, evidence, and integration
 
-## 1. Roles
+## Roles
 
-| Role | Count | Sees | Does | May NOT |
-|---|---|---|---|---|
-| **Planner** | 1 | WHITEBOARD, DECISIONS, LESSONS (full), DEBT, ticket summaries, verifier reports, SPEC, ARCHITECTURE | Decomposes stages into tickets; orders by dependency; spawns workers/verifiers/red team; writes a lesson after every rejection; runs checkpoints; advances stage; escalates to human | Write implementation code; mark a ticket `done`; edit contracts without an ADR |
-| **Worker** | many, parallel | Its ticket, SPEC (relevant ACs), ARCHITECTURE, CLAUDE.md, the contracts it implements | Implements in its own worktree; runs `verify.sh`; writes evidence; declares debt; opens PR | See other workers' output, planner reasoning, or WHITEBOARD history; edit contracts; weaken tests; touch audit files except appending to DEBT.md |
-| **Verifier** | 1 per finished ticket, fresh context | Ticket, diff, worker's evidence bundle, SPEC ACs, ARCHITECTURE | Re-runs `verify.sh --fresh` itself; reads the diff at atom level; checks scope and AC mapping; sets `done` or `rejected` with written reason; appends LEDGER line | See the worker's reasoning trace; fix code |
-| **Red team** | 1+ at Stage 3 | Whole repo, SPEC (esp. §6 risks), ARCHITECTURE | Tries to break ACs and risk items; writes findings as tickets with severity + repro; writes regression tests | Fix things; mark anything done |
-| **Human** | 1 | WHITEBOARD + escalations | Stage 0 contract review; Stage 2 demo; Stage 3 P0/P1 triage; Stage 4 sign-off; taste decisions | — |
-
-**Blindness is deliberate.** Workers don't see each other (no shared wrong assumptions).
-Verifiers don't see worker reasoning (no bias toward the same line of thought). A
-verifier *always* re-runs the gate; it never trusts the worker's `verify.json`.
-
-## 2. Tickets
-
-The atomic unit of agent work. One file per ticket in `tickets/`, from `tickets/TEMPLATE.md`.
-
-**Sizing rule:** a worker must finish a ticket within one context window (~1–2 h of
-agent work). Larger = planner failure → split. Oversized tickets are the main source
-of wasted tokens and half-done PRs.
-
-**Lifecycle:** `todo → building → verifying → done | rejected(n) | blocked`
-
-| Transition | Actor | Requires |
+| Role | Responsibility | Boundary |
 |---|---|---|
-| todo → building | planner (spawns worker) | deps done; worktree created |
-| building → verifying | worker | `verify.sh` green; evidence written; PR open |
-| verifying → done | **verifier only** | own `verify.sh --fresh` green; diff reviewed; ACs mapped; LEDGER line |
-| verifying → rejected(n) | verifier | written reason in evidence dir; planner writes lesson; back to planner, not same worker |
-| building → blocked | worker | budget exceeded or genuine blocker; diagnosis in ticket |
-| any → todo | planner | re-scoped; ADR if contract changed |
+| Planner | Scope tickets, dispatch Workers/Verifiers, name integration milestones, maintain state, escalate | Does not implement or mark feature tickets done |
+| Worker | Implement its ticket, test affected behavior, record local evidence and deferrals | Does not change shared contracts without a decision or claim integration certification |
+| Verifier | Independently read diffs/test quality, assess evidence, accept tickets against integrated milestone evidence | Does not fix code or blindly trust a Worker summary |
+| Red team | Attack SPEC risks, file reproducible findings and regression tests at Stage 3 | Does not fix findings or certify work |
+| Human | Stage 0 review, Stage 2 demo, consequential decisions, Stage 4 approval | Final authority on intended behavior |
 
-Every transition appends one line to `state/LEDGER.md` (`scripts/new-ticket.sh`
-and the role prompts do this).
+Keep independent context: Workers receive their assignment and relevant code/spec;
+Verifiers receive ticket, diff, evidence, SPEC, and ARCHITECTURE, not Worker reasoning.
+The repo supplies prompts/scripts, not an automatic agent scheduler.
 
-**Budgets:** each ticket has a token/time budget (default: 1 context window / 2 h).
-Exceeding it → worker stops, writes diagnosis, status `blocked`. Never loop on a
-flaky test.
+## Ticket lifecycle
 
-**Merge discipline:** one git worktree per ticket; rebase on main before running
-`verify.sh`; squash-merge; never force-push main.
+`todo → building → implemented → done`, with `rejected(n)` / `blocked` alternatives.
 
-## 3. State & persistence
-
-| File | Nature | Loaded by |
+| Transition | Actor | Evidence |
 |---|---|---|
-| `state/WHITEBOARD.md` | compact, rewritten each planner step: stage, active tickets, blocked, failed approaches (don't retry), next 3 moves | planner; any agent starting cold |
-| `state/DECISIONS.md` | append-only ADRs (context → decision → consequences); superseded ones marked, never removed | planner, verifier |
-| `state/LESSONS.md` | append-only record: every lesson ever, with status `active`/`retired`; retire = new line | planner (full); `gen-claude-md.sh` generates the view |
-| `CLAUDE.md` | invariants + **active** lessons only — the view | every agent |
-| `state/DEBT.md` | open shortcuts (id, ticket, what, why, plan) + closed section | workers append; planner burns down |
-| `state/LEDGER.md` | one line per ticket transition: `ts · ticket · from→to · actor · commit · evidence path` | auditor |
-| `state/evidence/<T>/attempt-N/` | `verify.json`, `verify.log`, `diff.patch`, `notes.md` (what I did / didn't do); verifier's `verdict.md` | verifier, auditor |
-| git | squash-merge per ticket; tag each stage gate | — |
+| todo → building | Planner | Dependencies available, owned files/worktree assigned, milestone named |
+| building → implemented | Worker | Focused ticket checks pass, diff/notes supplied, PR ready; deferred checks named |
+| implemented → done | Verifier | Required diff review and passing milestone report covering integrated code |
+| implemented → rejected(n) | Verifier | Concrete review defect and evidence path; return to Planner |
+| building → blocked | Worker | Genuine blocker or budget exhausted, diagnosis |
+| rejected/blocked → todo | Planner | Re-scoped assignment; decision if shared contract changes |
 
-**Record vs view.** The record (LESSONS, DECISIONS, DEBT, LEDGER, evidence/) is
-never trimmed; `scripts/checks/audit-append-only.sh` fails the gate if a prior line
-changes or an evidence file disappears. The view (CLAUDE.md) is curated: the
-planner retires lessons that never recur, and regenerates.
+T-000 is an infrastructure exception: human Stage 0 acceptance permits done with
+startup evidence. T-001 may be implemented before the first milestone and marked
+done by its Verifier when that milestone passes. No ordinary ticket can be called
+done on a local-only pass.
 
-**Lessons** use four series (from Miller):
-- **L** — tool/stack idioms ("this ORM's transactions don't nest")
-- **P** — process ("never mark done on a green build alone")
-- **M** — domain/model structure ("tenancy is a WHERE on every query, not middleware")
-- **B** — bridging/architecture ("adapter vs. patching the seam")
+Default budget is one context window / 2 hours; split oversized assignments. One
+worktree per Worker; parallelize disjoint ownership. Rebase before integration;
+squash-merge, never force-push main. `implemented` tickets can be integrated into
+an integration branch before certification. Main may serve as the integration
+branch if it is not automatically deployed; otherwise use a separate branch.
 
-Each lesson: failure mode → fix → operational rule. Earned from a specific ticket,
-never designed in advance.
+A dependent Worker may consume an implemented, reviewed interface with explicit
+Planner approval, but do not build a large chain on unverified changes. Changed
+shared interfaces trigger a milestone before substantial downstream work.
 
-## 4. Evidence bundle
+## Local verification and evidence
 
-Stage 1 (minimal): `verify.json` + `diff.patch`.
-Stage 2+ (full): add `notes.md` — what was built, ACs claimed (by id), what was
-*not* done, debt declared, commands to reproduce; plus screenshots/API logs for
-UI/API tickets.
+Each ticket specifies an exact focused command and why it checks the affected
+behavior. Prefer a test runner's file/test selection, focused type/lint checks, or
+a reproducible startup/behavior check where automated infrastructure is not ready.
+Security/access/data/money behavior needs meaningful tests as it is introduced;
+do not use deferred infrastructure to defer basic safety validation.
 
-A bundle without a passing `verify.json` is not accepted for verification.
+`STAGE=1 TICKET=T-012 plan/scripts/verify.sh --profile ticket -- pnpm run test:unit -- src/projects.test.ts`
 
-## 5. Verifier checklist
+The script records logs, profile, commit, dirty flag, command, results, and deferred
+broader checks. It preserves dependencies/caches. Exit 0 with profile=ticket means
+LOCAL CHECKS PASS, not whole-app certification. Do not repeatedly run the wrapper
+while editing; use fast commands directly, then record evidence at submission.
 
-1. `git fetch && git rebase main` on the ticket branch; `STAGE=$S TICKET=$T scripts/verify.sh --fresh`. Red → reject.
-2. Diff `verify.json` against the worker's copy (same commit? same checks?).
-3. Read the diff at atom level: do the tests actually exercise the claimed ACs, or just pass? Any `as any`, disabled rules, weakened assertions?
-4. Scope: anything outside the ticket's "in scope"? Contracts touched without ADR → reject.
-5. Debt: TODOs in code ↔ DEBT.md entries.
-6. Write `verdict.md` (accept/reject + reasons) into the evidence dir; append LEDGER; set status.
+Commit implementation before evidence capture when practical. Append evidence and
+notes afterward; identify the tested implementation commit separately from the
+later evidence-only commit. If testing uncommitted changes, include the exact diff
+and identify untracked implementation files. Dirty evidence is not reusable based
+on its commit SHA alone. Rebase/merge or any code/config/dependency changes invalidate
+reuse until the relevant checks are rerun on the resulting state.
 
-## 6. Failure handling
+Each attempt directory contains verify.json/log (and checks.tsv), plus diff.patch
+and notes.md. Notes list ACs checked, exact commands, tested implementation revision,
+what was not checked, and owning integration milestone. UI/API notes link screenshots
+or API logs when needed to substantiate behavior. Preserve old attempts.
 
-| Situation | Rule |
-|---|---|
-| `verify.sh` red in worker | fix; max 3 attempts; then `blocked` with diagnosis. Never weaken a test. |
-| Verifier rejects | back to planner; planner writes a lesson; re-scope or re-spawn a *fresh* worker |
-| Contract found wrong mid-stage | stop; ADR; re-lock; re-verify dependents one unit at a time |
-| Flaky test | quarantine on first flake: tag `@quarantine`, exclude, open ticket. Never retry into green. |
-| Failed build | downstream checks are invalid; do not trust cached results (`--fresh`) |
-| Red-team finding | becomes a ticket with severity + regression test; originating ticket gets a lesson |
-| 2 consecutive rejections on the same ticket | escalate to human |
-| Scope/taste decision, build-vs-defer a gap, ambiguity in SPEC | escalate to human; never guess |
+## Verifier policy
 
-## 7. Red-team playbook (Stage 3)
+- Stage 1: independent review of contract/auth/data/money changes before integration;
+  ordinary tickets can be reviewed together at their feature milestone.
+- Stage 2: independent per-ticket review for contract/auth/data/money; others batched.
+- Stage 3+: every ticket gets independent diff review, still with batched broad checks.
+- Ask: does each test actually exercise its AC, and would it fail if behavior broke?
+  Inspect scope, ownership, suppressions, weakened assertions, and debt.
+- A fresh context does NOT require a fresh installation. Rerun focused checks if
+  evidence is absent, stale, suspicious, environment-sensitive, or risk warrants it.
+- Reuse traceable evidence only for the same tested code, dependencies, configuration,
+  and relevant environment. CI evidence can satisfy a milestone; inspect the report.
+  Do not automatically repeat a valid full suite locally.
+- Accept implemented tickets as done only after matching them to a successful
+  integrated milestone and completing required review. Write verdicts and ledger
+  entries referencing the milestone's tested revision and evidence.
 
-Scope: SPEC §6 risks first and deepest; then generic categories.
+## Integration milestones
 
-For each risk / AC: adversarial inputs (empty, huge, unicode, injection), auth &
-tenancy (other user's ids, expired tokens, role escalation), concurrency (double
-submit, races), failure injection (DB down, 3rd-party timeout, partial writes),
-state (refresh mid-flow, back button, stale cache), money/idempotency if applicable.
+Planner records a milestone ID, scope/member tickets, stage, integration branch,
+checks deferred to it, and status in WHITEBOARD. This is the owner of routine broader
+verification deferrals; exceptional shortcuts also go in DEBT with an owning ticket.
 
-Output per finding: `tickets/RT-xx.md` with severity (P0 data loss/security/money,
-P1 core flow broken, P2 degraded, P3 cosmetic), repro steps, AC violated, and a
-failing regression test. Planner prioritizes; P0/P1 block the Stage 3 gate.
+At the first feature group, T-001 wires core checks and the real-flow smoke test and
+commits a config baseline. Run `--profile milestone` on combined code. No routine
+clean install. The runner clears only .reports JSON/XML output before broad runs;
+this directory is test-runner scratch, not a fixture or permanent evidence directory.
 
-## 8. Planner checkpoint (every 5 tickets, Stages 1–3)
+The runner gathers independent failures together. A failed build blocks browser/
+performance checks that need it; a failed fresh install blocks all later checks.
+If your integration tests require a build, adapt that dependency in verify.sh.
+Failed checks cannot be certified even if other checks pass. Missing required
+configuration fails the milestone. AC coverage runs after report-producing suites.
 
-`scripts/verify.sh --fresh` on main → rewrite WHITEBOARD → review DEBT → retire
-stale lessons (in the record, via status line) → regenerate CLAUDE.md → commit.
+Planner groups failures by cause and assigns repairs. Use targeted checks while
+repairing; rerun the milestone after the fixes. Verifier reviews the combined diff,
+report, and AC mapping, then records acceptance and closes covered tickets. Do not
+rerun the full milestone solely because status/evidence-only files were appended;
+verify no implementation, config, or dependency change occurred.
 
-## 9. Final acceptance (Stage 4)
+## State and history
 
-1. Fresh clone into a clean dir; `STAGE=4 scripts/verify.sh --fresh` → green.
-2. `scripts/ac-coverage.sh --strict` → 100%; zero skipped/quarantined tests on certified paths.
-3. Boundaries check green (reusable layer isolated).
-4. Red-team report: no open P0/P1; deferred items listed with rationale.
-5. DEBT.md open section empty or every item `deferred-accepted` by human.
-6. Write `ACCEPTANCE-REPORT.md`: what was built (by feature/AC), what was deferred, what was left out and why, evidence index, stage tags.
-7. Human reads the AC list + report once end-to-end and signs off (statement-faithfulness: do the ACs as written mean what was intended?). Sign-off line appended to LEDGER.
+- WHITEBOARD: compact current view, active tickets, milestones/deferrals, blockers,
+  failed approaches, next three actions. Update at meaningful transitions.
+- DECISIONS: append-only important architecture/shared-contract decisions.
+- LESSONS: append-only failures and operational rules; generate active view in CLAUDE.md.
+- DEBT: declared shortcuts; close by appending a matching ID in Closed / accepted.
+  Do not delete an Open row; the closure supersedes it. Human accepted deferrals
+  require explicit approval recorded with their rationale.
+- LEDGER: timestamp, ticket/milestone, transition, actor, implementation revision,
+  evidence path. Every status transition is recorded.
+- evidence/: all attempts, including failures. No editing prior evidence.
+
+Audit scripts are guardrails, not tamper-proof history or substitutes for review.
+
+## Failure handling
+
+Workers fix clear local failures without weakening tests. After three failed repair
+attempts, stop with a diagnosis. Verifier rejection returns to Planner, who records
+a lesson and re-scopes/re-spawns a fresh Worker. Two consecutive rejections escalate
+to human. Flaky tests get quarantine + owning ticket, not retries until green.
+Shared-contract changes require a decision and affected checks; clarify consequential
+scope/taste ambiguities with human. Preserve failed evidence; never relabel it a pass.
+
+## Red team and release
+
+At Stage 3 attack SPEC risks first: authorization/tenancy, concurrency, partial
+writes, dependency outages, malicious inputs, money/idempotency where relevant.
+Each finding gets RT-xx ticket, severity, repro, AC mapping, and failing regression.
+P0/P1 block release; other findings need fixes or accepted debt.
+
+At Stage 4 run release profile with --fresh on a clean committed release checkout,
+preferably a new clone. CI must be configured by release; the same CI run may supply
+the clean release evidence. Reviewer confirms no open high-severity findings,
+missing required checks, or skipped/quarantined tests on certified paths. Verify
+optional check applicability against SPEC. Write ACCEPTANCE-REPORT.md with features,
+ACs, deferrals, evidence index, and stage tags. Human reviews intent and signs off
+in LEDGER. A green script alone does not grant release approval.

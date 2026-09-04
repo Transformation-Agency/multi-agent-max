@@ -1,97 +1,116 @@
-# STAGES — the rigor dial
+# STAGES — progressive verification
 
-The same package, roles, and `verify.sh` run in every stage. What changes is *which
-checks run* and *who has to look*. The current stage is the `stage:` line in
-`state/WHITEBOARD.md`; `verify.sh` reads it (or `STAGE=` env). Planner advances the
-stage only when the exit gate passes, then tags git `stage-N-complete`.
+Stage controls product maturity; verification profile controls the work performed
+on this run. Read `stage:` in `state/WHITEBOARD.md` (or set `STAGE`). A ticket pass
+is local evidence, not certification of the combined app.
 
-Speed comes from **deferring** verification, not skipping it. Anything deferred is
-written down in `state/DEBT.md`.
+## Three verification profiles
 
-## Overview
+| Profile | When | What it does |
+|---|---|---|
+| `ticket` | Worker development/submission, any stage 0–3 | Runs an explicit focused command plus cheap audit/debt checks; checks the config baseline if it exists. Preserves dependencies, build caches, and reports. Lists broader checks as deferred. |
+| `milestone` | A coherent feature group is integrated, shared interfaces change, or a stage ends | Runs the stage's broader checks on combined code, reusing dependencies/caches. Collects independent failures in one report; blocks checks whose prerequisites failed. |
+| `release` | Stage 4 release candidate | Requires `--fresh` and a clean committed checkout, reinstalls from the lockfile, clears build caches, runs all release checks. |
 
-| Stage | SDLC analog | Goal | Human |
+Default profile: ticket at stages 0–1, milestone at stages 2–3, release at stage 4.
+Always specify the profile in ticket commands. Ticket requires a command after `--`.
+`--fresh` is never routine ticket work; milestone may use it for an environment
+problem. Stage 4 cannot use a cheaper profile.
+
+## Stage overview
+
+| Stage | Goal | Human |
+|---|---|---|
+| 0 Prepare | Clear first flow, essential design choices, scaffold starts locally | Review scope, essential interfaces/access rules |
+| 1 MVP | Golden demo works end-to-end; feature groups integration-verified | Escalations only |
+| 2 Integrate | Broader integration/browser coverage and configured verification | Demo walkthrough |
+| 3 Harden | Risk-focused red team, strict AC coverage, security checks | P0/P1 triage and accepted deferrals |
+| 4 Release | Clean-copy verification and acceptance report | Final sign-off |
+
+## Stage 0 → 1: small and bounded
+
+- SPEC defines first flow, observable success conditions, non-goals, and key risks.
+- ARCHITECTURE records stack, essential data/access decisions, and interfaces needed
+  by the first assignments. Unneeded future contracts can remain planned.
+- Scaffold starts locally; ticket evidence records the startup command/result.
+- Existing useful checks are used; do not build a full testing framework just to exit.
+- T-001 owns verification setup for the first feature milestone: core checks, smoke
+  test for a real flow, and config baseline. CI can wait until Stage 2 or release.
+- Human reviews the scope and essential agreements. Human acceptance of T-000 is
+  the infrastructure-only exception to integration certification; log it explicitly.
+
+No CI, complete contract stubs, database fixtures for future features, clean install,
+full build/test gate, or full browser suite is required to exit Stage 0.
+
+## Milestone check matrix (not per ticket)
+
+| Check | Stage 1 | Stage 2 | Stages 3–4 |
 |---|---|---|---|
-| 0 Lock | Design / scaffold | Contracts, stubs, CI, seed, golden-demo smoke all green | Review contracts (touchpoint 1) |
-| 1 MVP | Build | Golden demo works end-to-end, ugly OK | **None** |
-| 2 Integrate | Alpha / integration | Features work together; demoable | Demo walkthrough (touchpoint 2) |
-| 3 Harden | QA / security | Break it before users do; debt burn-down | Triage P0/P1 only |
-| 4 Release | UAT / acceptance | Fresh-clone win condition | Sign-off (touchpoint 3) |
+| Config baseline, audit, no-skip, debt consistency | Required | Required | Required |
+| Typecheck, unit tests, build, golden-demo smoke, test-count ratchet | Required | Required | Required |
+| Lint | Bug rules | Bug rules | Full |
+| Integration tests, smoke e2e, module boundaries | Deferred | Required | Required |
+| AC coverage | Deferred | Report uncovered ACs | Strict 100% |
+| Full e2e, security audit, env validation | Deferred | Deferred | Required |
+| Performance budgets | Deferred | Deferred | Required if SPEC defines them; configure perf-budgets.json |
+| Red-team regressions | Deferred | Deferred | Required when RT finding tickets exist |
+| Debt closed or explicitly human-accepted | — | — | Stage 4 only |
+| Clean install | Only environment diagnosis | Only environment diagnosis | Mandatory at release |
 
-## verify.sh checks by stage
+Missing required commands/reports/baselines FAIL a milestone or release. Exit 3
+means unconfigured, never a required-check pass. Adapt genuinely inapplicable stack
+checks explicitly in ARCHITECTURE and the script; do not silently substitute a no-op.
+The reviewer verifies optional performance/red-team applicability against the SPEC
+and red-team report. These human judgments are not automated by the script.
 
-| Check | 0 | 1 | 2 | 3 | 4 | Notes |
-|---|---|---|---|---|---|---|
-| clean state / frozen lockfile (`--fresh`) | ✓ | ✓ | ✓ | ✓ | ✓ | `--fresh` mandatory for verifier and Stage 4 |
-| config-hash (verify.sh, lint/ts/test configs unchanged) | ✓ | ✓ | ✓ | ✓ | ✓ | anti-gaming |
-| audit-append-only | ✓ | ✓ | ✓ | ✓ | ✓ | audit files only grow |
-| no-skip / no-only / assertion presence | ✓ | ✓ | ✓ | ✓ | ✓ | anti-gaming |
-| typecheck | ✓ | ✓ | ✓ | ✓ | ✓ | |
-| lint — bug rules only | ✓ | ✓ | ✓ | | | |
-| lint — full incl. style | | | | ✓ | ✓ | |
-| unit tests | ✓ | ✓ | ✓ | ✓ | ✓ | |
-| build | ✓ | ✓ | ✓ | ✓ | ✓ | |
-| test-count ratchet | ✓ | ✓ | ✓ | ✓ | ✓ | can't drop without ADR |
-| golden-demo smoke (1 flow, ~30s) | ✓ | ✓ | ✓ | ✓ | ✓ | written once in S0 |
-| debt ledger consistency | | ✓ | ✓ | ✓ | ✓ | TODO ↔ DEBT.md |
-| integration tests | | | ✓ | ✓ | ✓ | |
-| smoke e2e (3–6 flows) | | | ✓ | ✓ | ✓ | |
-| module boundaries / reusable layer | | | ✓ | ✓ | ✓ | |
-| AC coverage — report only | | | ✓ | | | |
-| AC coverage — strict 100% | | | | ✓ | ✓ | |
-| full e2e | | | | ✓ | ✓ | |
-| security (audit, secret scan, env schema) | | | | ✓ | ✓ | |
-| perf budgets | | | | (✓) | (✓) | only if SPEC §7 requires |
-| red-team regression suite | | | | ✓ | ✓ | tests written from findings |
-| debt ledger must be closed | | | | | ✓ | or each item explicitly accepted |
+## Integration cadence
 
-## Process dial by stage
+Planner names a milestone and its member tickets BEFORE dispatch. Run it after a
+coherent feature group lands and before building substantially on changed shared
+interfaces. Review the whiteboard every five tickets as a backstop; it does not
+itself require reinstalling or repeating a previously valid milestone run. If work
+has accumulated without integrated evidence, schedule the milestone now.
 
-| Process element | 0 | 1 | 2 | 3 | 4 |
-|---|---|---|---|---|---|
-| Blind verifier per ticket | human | off (gate only) | on for contract/auth/data/money tickets | on for all | on for all |
-| Evidence bundle | full | `verify.json` + diff | full | full | full |
-| Red team | | | | on, scoped to SPEC §6 risks | re-run on fixes |
-| Planner checkpoint (`verify.sh --fresh` on main + whiteboard rewrite) | | every 5 tickets | every 5 tickets | every 5 tickets | |
-| Lesson written after each rejection | ✓ | ✓ | ✓ | ✓ | ✓ |
+T-001 is completed alongside the first real flow and before its milestone. First
+milestone uses stage 1 even if other MVP features remain. After failures, group root
+causes, repair, run affected checks during repair, then run the milestone once on
+the repaired combined state. Never reuse evidence across changed code, dependencies,
+configuration, or a relevant environment change. Do not postpone all build feedback
+to the end of the app.
 
-## Stage exit gates
+## Stage 1 → 2
 
-**Stage 0 → 1**
-- All contracts in ARCHITECTURE §4 exist as code and compile with stubs.
-- `verify.sh` green (stage 0 set) on CI.
-- Seed fixtures + golden-demo smoke test exist and pass against stubs/minimal impl.
-- `scripts/checks/config-hash.sh --init` baseline committed.
-- Human has reviewed SPEC ACs and contracts and confirmed they match intent.
+- Stage 1 features and golden demo work; their tickets are `done` after milestone
+  evidence on the integrated revision and Verifier milestone acceptance.
+- First-flow smoke/core checks and committed config baseline exist.
+- A stage 1 milestone covers the current integrated state; debt has owners.
 
-**Stage 1 → 2**
-- Every SPEC feature tagged `stage: 1` has all its tickets `done` (gate-verified).
-- Golden demo script (SPEC §5) runs end-to-end.
-- `verify.sh --fresh` green on main.
-- DEBT.md reviewed by planner: every item has an owning ticket.
+## Stage 2 → 3
 
-**Stage 2 → 3**
-- All `stage: ≤2` features done, verifier-certified (retro-verify Stage 1 tickets touching contract/auth/data/money).
-- Integration + smoke e2e green.
-- AC coverage report: planner has a ticket for every uncovered AC.
-- Human demo done; feedback converted to tickets.
+- Stage ≤2 feature tickets are done; stage 2 milestone passes.
+- Contract/auth/data/money tickets have independent diff review (including Stage 1).
+- Every uncovered AC has an owning ticket.
+- Human demo feedback becomes tickets.
+- CI runs the same milestone command, or T-001 records a concrete release-owned CI
+  deferral. Do not duplicate an identical successful CI run locally without cause.
 
-**Stage 3 → 4**
-- AC coverage 100%, full e2e green, security checks green.
-- Red-team report filed; zero open P0/P1; P2+ either fixed or accepted in DEBT.md with rationale.
-- Every red-team finding has a regression test.
-- DEBT.md: open items are each explicitly `deferred-accepted` by human or closed.
+## Stage 3 → 4
 
-**Stage 4 → finished**  (see PROTOCOL.md §9)
-- Fresh clone, `STAGE=4 verify.sh --fresh` green.
-- `ACCEPTANCE-REPORT.md` written.
-- Human sign-off recorded in LEDGER.md.
+- Current stage 3 milestone passes; AC coverage is 100%.
+- Red-team report addresses SPEC risks; no open P0/P1; each finding has a regression.
+- Remaining debt is closed or explicitly deferred-accepted by human.
+- CI is configured before release, even if deferred at Stage 2.
 
-## Invariants — never relax
+## Stage 4 → finished
 
-1. Contracts change only via ADR.
-2. Tests are never weakened to pass. Flaky → quarantine (tag + exclude + ticket) on first occurrence; never retried into green.
-3. Debt declared, not hidden.
-4. Whiteboard maintained.
-5. Audit record append-only (LESSONS, DECISIONS, DEBT, LEDGER, evidence/, git history — no force-push to main).
-6. Only a Verifier sets `done`.
+- Fresh clone/clean release checkout; `STAGE=4 TICKET=release plan/scripts/verify.sh
+  --profile release --fresh` passes. CI may supply this evidence for the same revision.
+- No quarantined/skipped tests on certified paths (Verifier checks this explicitly).
+- ACCEPTANCE-REPORT.md and human sign-off in LEDGER.
+
+## Invariants
+
+Contracts shared by Workers change via recorded decisions; tests are never weakened
+to pass; shortcuts and deferred checks stay visible; audit records remain append-only.
+Only a Verifier sets feature tickets `done` after integrated evidence. A ticket's
+`implemented` status never claims milestone or release certification.
